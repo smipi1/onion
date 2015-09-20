@@ -27,28 +27,55 @@
 #include "trivia.h"
 #include "questions.h"
 
-/**
- * @short This handler just answers the content of the POST parameter "text"
- * 
- * It checks if its a HEAD in which case it writes the headers, and if not just printfs the
- * user data.
- */
-onion_connection_status post_data(void *_, onion_request *req, onion_response *res){
-	if (onion_request_get_flags(req)&OR_HEAD){
-		onion_response_write_headers(res);
-		return OCS_PROCESSED;
-	}
-	const char *user_data=onion_request_get_post(req,"text");
-	onion_response_printf(res, "The user wrote: %s", user_data);
-	return OCS_PROCESSED;
-}
-
 onion *o=NULL;
 
 void onexit(int _){
 	ONION_INFO("Exit");
 	if (o)
 		onion_listen_stop(o);
+}
+
+int add_landing_page(onion_url* urls)
+{
+	char r;
+	char *page;
+	if((r = asprintf(
+		&page,
+		"<html>\n"
+		"<head>\n"
+		" <title>%s</title>\n"
+		"</head>\n"
+		"\n"
+		"%s\n"
+		"<form method=\"POST\" action=\"%s\">\n"
+		"<input type=\"submit\" value=\"Start\" autofocus>\n"
+		"</form>\n"
+		"\n"
+		"</html>\n",
+		trivia_title,
+		trivia_welcome_message,
+		trivia_questions->uri)) == -1) {
+		printf("error: cannot format landing page");
+		return r;
+	}
+	return onion_url_add_static(urls, "", page, HTTP_OK);
+}
+
+onion_connection_status handle_done(void *_, onion_request *req, onion_response *res)
+{
+	static int load_count = 0;
+	load_count++;
+	if(load_count == 1) {
+		onion_response_printf(res, trivia_end.winner_message, load_count);
+	} else {
+		onion_response_printf(res, trivia_end.other_message, load_count);
+	}
+	return OCS_PROCESSED;
+}
+
+int add_done_page(urls)
+{
+	return onion_url_add(urls, trivia_end.uri, handle_done);
 }
 
 int add_question_page(onion_url *urls, trivia_question const* const q)
@@ -64,8 +91,8 @@ int add_question_page(onion_url *urls, trivia_question const* const q)
 		"<div>"
 		"\n"
 		"%s\n"
-		"<form method=\"POST\" action=\"%s/data\">\n"
-		"<input type=\"text\" name=\"text\">\n"
+		"<form method=\"POST\" action=\"%s_data\">\n"
+		"<input type=\"answer\" name=\"answer\" autofocus>\n"
 		"<input type=\"submit\">\n"
 		"</form>\n"
 		"</div>"
@@ -96,8 +123,8 @@ int add_bad_answer_question_page(onion_url *urls, trivia_question* const q)
 		"<div>"
 		"\n"
 		"%s\n"
-		"<form method=\"POST\" action=\"%s/data\">\n"
-		"<input type=\"text\" name=\"text\">\n"
+		"<form method=\"POST\" action=\"%s_data\">\n"
+		"<input type=\"answer\" name=\"answer\" autofocus>\n"
 		"<input type=\"submit\">\n"
 		"</form>\n"
 		"</div>"
@@ -160,23 +187,21 @@ onion_connection_status check_answer(void *privdata, onion_request *req, onion_r
 		onion_response_write_headers(res);
 		return OCS_PROCESSED;
 	}
-	const char *answer = onion_request_get_post(req,"text");
+	const char *answer = onion_request_get_post(req,"answer");
 	const char *uri;
 	if(strcmp_ignoring_case_and_whitespace(q->correct_answer, answer) == 0) {
 		uri = q->correct_uri;
 	} else {
 		uri = q->again_uri;
 	}
-	char relative_uri[255];
-	snprintf(&relative_uri, sizeof(relative_uri), "../%s", uri);
-	return onion_shortcut_response_extra_headers("<h1>302 - Moved</h1>", HTTP_REDIRECT, req, res, "Location", relative_uri, NULL );
+	return onion_shortcut_response_extra_headers("<h1>302 - Moved</h1>", HTTP_REDIRECT, req, res, "Location", uri, NULL );
 }
 
 int add_answer_redirect_page(onion_url *urls, trivia_question* const q)
 {
 	int r;
 	char *uri;
-	if((r = asprintf(&uri, "%s/data", q->uri)) == -1) {
+	if((r = asprintf(&uri, "%s_data", q->uri)) == -1) {
 		return r;
 	}
 	return onion_url_add_handler(urls, uri, onion_handler_new(check_answer, q, NULL));
@@ -188,7 +213,7 @@ int add_questions(onion_url *urls)
 	trivia_question* prev_q = NULL;
 	trivia_question* q = NULL;
 	for(i = 0; i < sizeof(trivia_questions) / sizeof(trivia_questions[0]); i++) {
-		trivia_question* q = trivia_questions + i;
+		q = trivia_questions + i;
 		int r;
 		if((r = add_question_pages(urls, q))) {
 			return r;
@@ -202,7 +227,7 @@ int add_questions(onion_url *urls)
 		prev_q = q;
 	}
 	if(q) {
-		q->correct_uri = "";
+		q->correct_uri = trivia_end.uri;
 	}
 	return 0;
 }
@@ -215,22 +240,9 @@ int main(int argc, char **argv){
 	o=onion_new(O_ONE_LOOP);
 	onion_url *urls=onion_root_url(o);
 	
-	onion_url_add_static(urls, "", 
-"<html>\n"
-"<head>\n"
-" <title>Simple post example</title>\n"
-"</head>\n"
-"\n"
-"Write something: \n"
-"<form method=\"POST\" action=\"data\">\n"
-"<input type=\"text\" name=\"text\">\n"
-"<input type=\"submit\">\n"
-"</form>\n"
-"\n"
-"</html>\n", HTTP_OK);
-
 	add_questions(urls);
-	onion_url_add(urls, "data", post_data);
+	add_landing_page(urls);
+	add_done_page(urls);
 
 	signal(SIGTERM, onexit);	
 	signal(SIGINT, onexit);	

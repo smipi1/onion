@@ -26,6 +26,8 @@ extern "C"{
 
 char* trivia_title = "Trivia: Linux in a light bulb";
 
+char* trivia_welcome_message = "Welcome to the Linux in a light bulb trivia:";
+
 char* trivia_bad_answer_message = "Nope! Sorry... Try again if you like:";
 
 trivia_question trivia_questions[] = {
@@ -39,11 +41,13 @@ trivia_question trivia_questions[] = {
 		"What color is the grass?",
 		"Green",
 	},
-	{
-		"3",
-		"Congratulations, you've won!",
-		NULL,
-	},
+};
+
+trivia_done trivia_end =
+{
+	"youve_won",
+	"Congratulations, you are the winner!",
+	"Unfortunately you were beaten. You are number %d.",
 };
 
 #ifdef __cplusplus
