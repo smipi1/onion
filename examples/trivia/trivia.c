@@ -209,12 +209,10 @@ onion_connection_status check_answer(void *privdata, onion_request *req, onion_r
 	const char *answer = onion_request_get_post(req,"answer");
 	const char *uri;
 	if(strcmp_ignoring_case_and_whitespace(q->correct_answer, answer) == 0) {
-		lamp.red = 0;
 		lamp.green = 65535;
-		lamp.blue = 0;
-		lamp.white = 0;
 		uri = q->correct_uri;
 	} else {
+		lamp.red = 65535;
 		uri = q->again_uri;
 	}
 	return onion_shortcut_response_extra_headers("<h1>302 - Moved</h1>", HTTP_REDIRECT, req, res, "Location", uri, NULL );
@@ -357,6 +355,16 @@ void send_colors(int fd)
 				lamp.white);
 }
 
+void fade_colors(void)
+{
+	int const p = 970;
+	int const p_div = 1000;
+	lamp.red = lamp.red * p / p_div;
+	lamp.green = lamp.green * p / p_div;
+	lamp.blue = lamp.blue * p / p_div;
+	lamp.white = lamp.white * p / p_div;
+}
+
 void *lamp_control_task(void *arg)
 {
 	int fd;
@@ -397,6 +405,8 @@ void *lamp_control_task(void *arg)
 			send_colors(fd);
 		} else if(strcmp("ColorTest,SetDutyCycles,0", frame) == 0) {
 			send_colors(fd);
+			fade_colors();
+			usleep(33333);
 		}
 	}
 	return NULL;
