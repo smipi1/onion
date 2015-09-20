@@ -24,6 +24,7 @@ endif (OPACK)
 
 
 add_subdirectory(post)
+add_subdirectory(trivia)
 add_subdirectory(userver)
 add_subdirectory(interactive)
 add_subdirectory(hello)
