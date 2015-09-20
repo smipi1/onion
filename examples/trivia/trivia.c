@@ -17,15 +17,34 @@
 	*/
 
 #define _GNU_SOURCE
+#include <stdint.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
 #include <signal.h>
 #include <onion/log.h>
 #include <onion/onion.h>
+#include <onion/http.h>
 #include <onion/shortcuts.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <pthread.h>
+#include <unistd.h>
 #include "trivia.h"
 #include "questions.h"
+
+struct rgbw_t {
+	uint16_t red;
+	uint16_t green;
+	uint16_t blue;
+	uint16_t white;
+};
+
+typedef struct rgbw_t rgbw;
+
+rgbw lamp = { 0 };
 
 onion *o=NULL;
 
@@ -73,7 +92,7 @@ onion_connection_status handle_done(void *_, onion_request *req, onion_response 
 	return OCS_PROCESSED;
 }
 
-int add_done_page(urls)
+int add_done_page(onion_url* urls)
 {
 	return onion_url_add(urls, trivia_end.uri, handle_done);
 }
@@ -190,6 +209,10 @@ onion_connection_status check_answer(void *privdata, onion_request *req, onion_r
 	const char *answer = onion_request_get_post(req,"answer");
 	const char *uri;
 	if(strcmp_ignoring_case_and_whitespace(q->correct_answer, answer) == 0) {
+		lamp.red = 0;
+		lamp.green = 65535;
+		lamp.blue = 0;
+		lamp.white = 0;
 		uri = q->correct_uri;
 	} else {
 		uri = q->again_uri;
@@ -232,20 +255,184 @@ int add_questions(onion_url *urls)
 	return 0;
 }
 
+int setup_device_for_lamp(int fd, char *device)
+{
+	struct termios tty = { 0 };
+	if(tcgetattr(fd, &tty) != 0) {
+		printf("error: tcgetattr(%s): %s\n", device, strerror(errno));
+		return -1;
+	}
+	cfsetospeed(&tty, B115200);
+	cfsetispeed(&tty, B115200);
+	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
+	tty.c_iflag &= ~IGNBRK;         // disable break processing
+	tty.c_lflag = 0;                // no signaling chars, no echo,
+	                                // no canonical processing
+	tty.c_oflag = 0;                // no remapping, no delays
+	tty.c_cc[VMIN] = 1;             // read doesn't block
+	tty.c_cc[VTIME] = 0;            // read timeout disabled
+
+	tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
+
+	tty.c_cflag |= (CLOCAL | CREAD); // ignore modem controls,
+	                                 // enable reading
+	tty.c_cflag &= ~(PARENB | PARODD);      // shut off parity
+	tty.c_cflag &= ~CSTOPB;
+	tty.c_cflag &= ~CRTSCTS;
+
+	return tcsetattr (fd, TCSANOW, &tty);
+}
+
+int get_frame(int fd, char *device, char **frame)
+{
+	static char buf[1024];
+	int size = 0;
+	while(1) {
+		int c = read(fd, buf, 1);
+		if(c == -1) {
+			printf("error: read(%s): %s\n", device, strerror(errno));
+			return c;
+		}
+		if(c == 0)
+			continue;
+		if(buf[0] == '[')
+			break;
+	}
+	while(1) {
+		int i;
+		int c = read(fd, buf + size, sizeof(buf) - size);
+		if(c == -1) {
+			printf("error: read(%s): %s\n", device, strerror(errno));
+			return c;
+		}
+		if(c == 0)
+			continue;
+		int const new_size = size + c;
+		for(i = size; i < new_size; i++) {
+			if(buf[i] == ']') {
+				buf[i] = '\0';
+				*frame = buf;
+				return i;
+			}
+		}
+		size = new_size;
+	}
+	return -1;
+}
+
+int send_frame(int fd, char *format, ...)
+{
+	int r;
+	{
+		va_list debug_args;
+		va_start(debug_args, format);
+		if(printf("tx:[") == -1) {
+			r = -1;
+		} else if((r = vprintf(format, debug_args)) == -1) {
+			r = -1;
+		} else if(printf("]\r\n") == -1) {
+			r = -1;
+		}
+		va_end(debug_args);
+	}
+	va_list args;
+	va_start(args, format);
+	if(dprintf(fd, "[") == -1) {
+		r = -1;
+	} else if((r = vdprintf(fd, format, args)) == -1) {
+		r = -1;
+	} else if(dprintf(fd, "]\r") == -1) {
+		r = -1;
+	}
+	va_end(args);
+	return r;
+}
+
+void send_colors(int fd)
+{
+	send_frame(fd, "ColorTest,SetDutyCycles,%d,%d,%d,%d",
+				lamp.red,
+				lamp.green,
+				lamp.blue,
+				lamp.white);
+}
+
+void *lamp_control_task(void *arg)
+{
+	int fd;
+	char *device = arg;
+	fd = open(device, O_RDWR);
+	if(fd == -1) {
+		printf("error: open lamp device (%s): %s\n", device, strerror(errno));
+		exit(1);
+	}
+	if(setup_device_for_lamp(fd, device) == -1) {
+		printf("error: setup_device_for_lamp(%s): %s\n", device, strerror(errno));
+		exit(1);
+	}
+	typedef enum {
+		lamp_state_none = 0,
+		lamp_state_factory,
+		lamp_state_colortest,
+	} lamp_state_t;
+	lamp_state_t state = lamp_state_none;
+	tcflush(fd, TCIOFLUSH);
+	send_frame(fd, "TH,Reset,FactoryTest");
+	while(1) {
+		char *frame;
+		int size;
+		if((size = get_frame(fd, device, &frame)) == -1) {
+			printf("error: get_frame(%s): %s\n", device, strerror(errno));
+			return NULL;
+		}
+		printf("rx:[%s]\n", frame);
+		if(strcmp("TH,Ready,0", frame) == 0) {
+			sleep(1);
+			send_frame(fd, "ColorTest,Init");
+		} else if(strcmp("SYS,Error,Incorrect format", frame) == 0) {
+			send_frame(fd, "TH,Reset,FactoryTest");
+		} else if(strcmp("Log,Info,N_Connection,Discovery for updated networks completed", frame) == 0) {
+			send_frame(fd, "ColorTest,Init");
+		} else if(strcmp("ColorTest,Init,0", frame) == 0) {
+			send_colors(fd);
+		} else if(strcmp("ColorTest,SetDutyCycles,0", frame) == 0) {
+			send_colors(fd);
+		}
+	}
+	return NULL;
+}
+
 /**
  * This example creates a onion server and adds two urls: the base one is a static content with a form, and the
  * "data" URL is the post_data handler.
  */
-int main(int argc, char **argv){
+int main(int argc, char **argv)
+{
+	pthread_t lamp_control_thread;
+	if(pthread_create(&lamp_control_thread, NULL, lamp_control_task, "/dev/ttyUSB0")) {
+		printf("error: cannot start lamp_control_task: %s\n", strerror(errno));
+		exit(1);
+	}
+
 	o=onion_new(O_ONE_LOOP);
 	onion_url *urls=onion_root_url(o);
 	
-	add_questions(urls);
-	add_landing_page(urls);
-	add_done_page(urls);
+	if(add_questions(urls)) {
+		printf("error: add_questions(): %s\n", strerror(errno));
+		exit(1);
+	}
+	if(add_landing_page(urls)) {
+		printf("error: add_landing_page(): %s\n", strerror(errno));
+		exit(1);
+	}
+	if(add_done_page(urls)) {
+		printf("error: add_done_page(): %s\n", strerror(errno));
+		exit(1);
+	}
 
-	signal(SIGTERM, onexit);	
-	signal(SIGINT, onexit);	
+	signal(SIGTERM, onexit);
+	signal(SIGINT, onexit);
+	onion_add_listen_point(o, NULL, "8080", onion_http_new());
 	onion_listen(o);
 
 	onion_free(o);
