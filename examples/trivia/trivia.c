@@ -30,7 +30,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <termios.h>
-#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include "trivia.h"
 #include "questions.h"
@@ -44,12 +45,14 @@ struct rgbw_t {
 
 typedef struct rgbw_t rgbw;
 
-rgbw lamp = { 0 };
+rgbw *lamp;
+int child;
 
 onion *o=NULL;
 
-void onexit(int _){
+void onexit(int sig){
 	ONION_INFO("Exit");
+	kill(child, sig);
 	if (o)
 		onion_listen_stop(o);
 }
@@ -209,10 +212,10 @@ onion_connection_status check_answer(void *privdata, onion_request *req, onion_r
 	const char *answer = onion_request_get_post(req,"answer");
 	const char *uri;
 	if(strcmp_ignoring_case_and_whitespace(q->correct_answer, answer) == 0) {
-		lamp.green = 65535;
+		lamp->green = 65535;
 		uri = q->correct_uri;
 	} else {
-		lamp.red = 65535;
+		lamp->red = 65535;
 		uri = q->again_uri;
 	}
 	return onion_shortcut_response_extra_headers("<h1>302 - Moved</h1>", HTTP_REDIRECT, req, res, "Location", uri, NULL );
@@ -349,26 +352,25 @@ int send_frame(int fd, char *format, ...)
 void send_colors(int fd)
 {
 	send_frame(fd, "ColorTest,SetDutyCycles,%d,%d,%d,%d",
-				lamp.red,
-				lamp.green,
-				lamp.blue,
-				lamp.white);
+				lamp->red,
+				lamp->green,
+				lamp->blue,
+				lamp->white);
 }
 
 void fade_colors(void)
 {
 	int const p = 970;
 	int const p_div = 1000;
-	lamp.red = lamp.red * p / p_div;
-	lamp.green = lamp.green * p / p_div;
-	lamp.blue = lamp.blue * p / p_div;
-	lamp.white = lamp.white * p / p_div;
+	lamp->red = lamp->red * p / p_div;
+	lamp->green = lamp->green * p / p_div;
+	lamp->blue = lamp->blue * p / p_div;
+	lamp->white = lamp->white * p / p_div;
 }
 
-void *lamp_control_task(void *arg)
+int lamp_control_task(char *device)
 {
 	int fd;
-	char *device = arg;
 	fd = open(device, O_RDWR);
 	if(fd == -1) {
 		printf("error: open lamp device (%s): %s\n", device, strerror(errno));
@@ -378,12 +380,6 @@ void *lamp_control_task(void *arg)
 		printf("error: setup_device_for_lamp(%s): %s\n", device, strerror(errno));
 		exit(1);
 	}
-	typedef enum {
-		lamp_state_none = 0,
-		lamp_state_factory,
-		lamp_state_colortest,
-	} lamp_state_t;
-	lamp_state_t state = lamp_state_none;
 	tcflush(fd, TCIOFLUSH);
 	send_frame(fd, "TH,Reset,FactoryTest");
 	while(1) {
@@ -391,7 +387,7 @@ void *lamp_control_task(void *arg)
 		int size;
 		if((size = get_frame(fd, device, &frame)) == -1) {
 			printf("error: get_frame(%s): %s\n", device, strerror(errno));
-			return NULL;
+			return 1;
 		}
 		printf("rx:[%s]\n", frame);
 		if(strcmp("TH,Ready,0", frame) == 0) {
@@ -409,21 +405,11 @@ void *lamp_control_task(void *arg)
 			usleep(33333);
 		}
 	}
-	return NULL;
+	return 1;
 }
 
-/**
- * This example creates a onion server and adds two urls: the base one is a static content with a form, and the
- * "data" URL is the post_data handler.
- */
-int main(int argc, char **argv)
+int trivia(void)
 {
-	pthread_t lamp_control_thread;
-	if(pthread_create(&lamp_control_thread, NULL, lamp_control_task, "/dev/ttyUSB0")) {
-		printf("error: cannot start lamp_control_task: %s\n", strerror(errno));
-		exit(1);
-	}
-
 	o=onion_new(O_ONE_LOOP);
 	onion_url *urls=onion_root_url(o);
 	
@@ -447,4 +433,20 @@ int main(int argc, char **argv)
 
 	onion_free(o);
 	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	lamp = mmap(NULL, sizeof *lamp, PROT_READ | PROT_WRITE,
+	            MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	child = fork();
+	switch(child) {
+	case -1: // Errors
+		printf("error: fork(): %s\n", strerror(errno));
+		return 1;
+	case 0:  // Child process
+		return lamp_control_task("/dev/ttyUSB0");
+	default: // Parent process
+		return trivia();
+	}
 }
