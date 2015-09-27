@@ -30,7 +30,7 @@
 #include <time.h>
 #include <unistd.h>
 #ifdef __DEBUG__
-#include <execinfo.h>
+//#include <execinfo.h>
 #endif
 #include <unistd.h>
 #include <fcntl.h>
