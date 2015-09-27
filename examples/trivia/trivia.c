@@ -439,6 +439,10 @@ int main(int argc, char **argv)
 {
 	lamp = mmap(NULL, sizeof *lamp, PROT_READ | PROT_WRITE,
 	            MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if(lamp == MAP_FAILED) {
+		printf("error: mmap(): %s\n", strerror(errno));
+		exit(1);
+	}
 	child = fork();
 	switch(child) {
 	case -1: // Errors
