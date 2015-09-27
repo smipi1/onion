@@ -64,6 +64,16 @@ void onion_log_stderr(onion_log_level level, const char *filename, int lineno, c
  */
 void (*onion_log)(onion_log_level level, const char *filename, int lineno, const char *fmt, ...)=onion_log_stderr;
 
+char * onion_basename(char *path)
+{
+	int len = strlen(path);
+	char *fromLast = path + (len - 1);
+	while(*fromLast != '/') {
+		fromLast--;
+	}
+	return fromLast;
+}
+
 /**
  * @short Logs to stderr.
  * 
@@ -123,7 +133,7 @@ void onion_log_stderr(onion_log_level level, const char *filename, int lineno, c
 		return;
 	}
 	
-	filename=basename((char*)filename);
+	filename=onion_basename((char*)filename);
 	
 #ifdef __DEBUG__
 	if ( (level==O_DEBUG0) && (!debug0 || !strstr(debug0, filename)) ){
