@@ -270,7 +270,7 @@ int setup_device_for_lamp(int fd, char *device)
 	tty.c_lflag = 0;                // no signaling chars, no echo,
 	                                // no canonical processing
 	tty.c_oflag = 0;                // no remapping, no delays
-	tty.c_cc[VMIN] = 1;             // read doesn't block
+	tty.c_cc[VMIN] = 0;             // read doesn't block
 	tty.c_cc[VTIME] = 0;            // read timeout disabled
 
 	tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
@@ -284,30 +284,56 @@ int setup_device_for_lamp(int fd, char *device)
 	return tcsetattr (fd, TCSANOW, &tty);
 }
 
+int timed_out(int c, int *ms_idle)
+{
+	if(c != 0) {
+		(*ms_idle) = 0;
+		return 0;
+	} else if((*ms_idle) > 100) {
+		return 1;
+	} else {
+		(*ms_idle)++;
+		usleep(1000);
+		return 0;
+	}
+}
+
 int get_frame(int fd, char *device, char **frame)
 {
 	static char buf[1024];
 	int size = 0;
+	int ms_idle = 0;
 	while(1) {
 		int c = read(fd, buf, 1);
+		if(timed_out(c, &ms_idle)) {
+			buf[0] = '\0';
+			return 0;
+		}
 		if(c == -1) {
 			printf("error: read(%s): %s\n", device, strerror(errno));
 			return c;
 		}
-		if(c == 0)
+		if(c == 0) {
 			continue;
+		}
 		if(buf[0] == '[')
 			break;
 	}
 	while(1) {
 		int i;
 		int c = read(fd, buf + size, sizeof(buf) - size);
+		if(timed_out(c, &ms_idle)) {
+			printf("timeout\n");
+			buf[0] = '\0';
+			return 0;
+		}
 		if(c == -1) {
 			printf("error: read(%s): %s\n", device, strerror(errno));
 			return c;
 		}
-		if(c == 0)
+		if(c == 0) {
 			continue;
+		}
 		int const new_size = size + c;
 		for(i = size; i < new_size; i++) {
 			if(buf[i] == ']') {
@@ -400,12 +426,18 @@ int lamp_control_task(char *device)
 			printf("error: get_frame(%s): %s\n", device, strerror(errno));
 			return 1;
 		}
+		if(!size) {
+			printf("rx:timeout\n");
+			reset_to_factory_test(fd);
+			continue;
+		}
 		printf("rx:[%s]\n", frame);
 		if(strcmp("TH,Ready,0", frame) == 0) {
 			sleep(1);
 			init_color_test(fd);
 			color_init_attempts++;
-		} else if(strcmp("SYS,Error,Incorrect format", frame) == 0) {
+		} else if((strcmp("SYS,Error,Incorrect format", frame) == 0) ||
+				  (strcmp("SYS,Error,Unknown component", frame) == 0)) {
 			if((color_init_attempts > 0) && (color_init_attempts < 5)) {
 				init_color_test(fd);
 				color_init_attempts++;
@@ -413,18 +445,14 @@ int lamp_control_task(char *device)
 				color_init_attempts = 0;
 				reset_to_factory_test(fd);
 			}
-		} else if(strcmp("Log,Info,N_Connection,Discovery for updated networks completed", frame) == 0) {
-			init_color_test(fd);
 		} else if(strcmp("ColorTest,Init,0", frame) == 0) {
 			send_colors(fd);
-		} else if(strcmp("SYS,Error,Unknown component", frame) == 0) {
-			init_color_test(fd);
 		} else if(strcmp("ColorTest,SetDutyCycles,0", frame) == 0) {
 			send_colors(fd);
 			fade_colors();
 			usleep(33333);
 		} else if(strstr(frame, "ColorTest") != NULL) {
-			init_color_test(fd);
+			reset_to_factory_test(fd);
 		}
 	}
 	return 1;
