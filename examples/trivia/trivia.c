@@ -106,6 +106,10 @@ onion_connection_status handle_reset(void *_, onion_request *req, onion_response
 {
 	done_count = 0;
 	lamp->have_winner = 0;
+	lamp->red = 0;
+	lamp->green = 0;
+	lamp->blue = 0;
+	lamp->white = 0;
 	return OCS_PROCESSED;
 }
 
