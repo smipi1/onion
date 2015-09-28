@@ -423,6 +423,8 @@ int lamp_control_task(char *device)
 			send_colors(fd);
 			fade_colors();
 			usleep(33333);
+		} else if(strstr(frame, "ColorTest") != NULL) {
+			init_color_test(fd);
 		}
 	}
 	return 1;
