@@ -370,8 +370,12 @@ void fade_colors(void)
 
 void init_color_test(int fd)
 {
-	sleep(1);
 	send_frame(fd, "ColorTest,Init");
+}
+
+void reset_to_factory_test(int fd)
+{
+	send_frame(fd, "TH,Reset,FactoryTest");
 }
 
 int lamp_control_task(char *device)
@@ -387,7 +391,7 @@ int lamp_control_task(char *device)
 		exit(1);
 	}
 	tcflush(fd, TCIOFLUSH);
-	send_frame(fd, "TH,Reset,FactoryTest");
+	reset_to_factory_test(fd);
 	while(1) {
 		char *frame;
 		static int color_init_attempts = 0;
@@ -398,6 +402,7 @@ int lamp_control_task(char *device)
 		}
 		printf("rx:[%s]\n", frame);
 		if(strcmp("TH,Ready,0", frame) == 0) {
+			sleep(1);
 			init_color_test(fd);
 			color_init_attempts++;
 		} else if(strcmp("SYS,Error,Incorrect format", frame) == 0) {
@@ -406,12 +411,14 @@ int lamp_control_task(char *device)
 				color_init_attempts++;
 			} else {
 				color_init_attempts = 0;
-				send_frame(fd, "TH,Reset,FactoryTest");
+				reset_to_factory_test(fd);
 			}
 		} else if(strcmp("Log,Info,N_Connection,Discovery for updated networks completed", frame) == 0) {
-			send_frame(fd, "ColorTest,Init");
+			init_color_test(fd);
 		} else if(strcmp("ColorTest,Init,0", frame) == 0) {
 			send_colors(fd);
+		} else if(strcmp("SYS,Error,Unknown component", frame) == 0) {
+			init_color_test(fd);
 		} else if(strcmp("ColorTest,SetDutyCycles,0", frame) == 0) {
 			send_colors(fd);
 			fade_colors();
