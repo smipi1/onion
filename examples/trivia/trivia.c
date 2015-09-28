@@ -488,7 +488,7 @@ int trivia(void)
 	signal(SIGINT, onexit);
 
 	printf("adding listening point\n");
-	onion_add_listen_point(o, NULL, "8080", onion_http_new());
+	onion_add_listen_point(o, NULL, "80", onion_http_new());
 
 	printf("listening\n");
 	onion_listen(o);
