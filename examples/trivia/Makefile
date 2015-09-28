@@ -1,5 +1,5 @@
 all:
-	gcc -o trivia trivia.c -lonion_static -static
+	gcc -o trivia trivia.c
 
 clean:
 	rm trivia

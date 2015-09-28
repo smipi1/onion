@@ -368,6 +368,12 @@ void fade_colors(void)
 	lamp->white = lamp->white * p / p_div;
 }
 
+void init_color_test(int fd)
+{
+	sleep(1);
+	send_frame(fd, "ColorTest,Init");
+}
+
 int lamp_control_task(char *device)
 {
 	int fd;
@@ -384,6 +390,7 @@ int lamp_control_task(char *device)
 	send_frame(fd, "TH,Reset,FactoryTest");
 	while(1) {
 		char *frame;
+		static int color_init_attempts = 0;
 		int size;
 		if((size = get_frame(fd, device, &frame)) == -1) {
 			printf("error: get_frame(%s): %s\n", device, strerror(errno));
@@ -391,10 +398,16 @@ int lamp_control_task(char *device)
 		}
 		printf("rx:[%s]\n", frame);
 		if(strcmp("TH,Ready,0", frame) == 0) {
-			sleep(1);
-			send_frame(fd, "ColorTest,Init");
+			init_color_test(fd);
+			color_init_attempts++;
 		} else if(strcmp("SYS,Error,Incorrect format", frame) == 0) {
-			send_frame(fd, "TH,Reset,FactoryTest");
+			if((color_init_attempts > 0) && (color_init_attempts < 5)) {
+				init_color_test(fd);
+				color_init_attempts++;
+			} else {
+				color_init_attempts = 0;
+				send_frame(fd, "TH,Reset,FactoryTest");
+			}
 		} else if(strcmp("Log,Info,N_Connection,Discovery for updated networks completed", frame) == 0) {
 			send_frame(fd, "ColorTest,Init");
 		} else if(strcmp("ColorTest,Init,0", frame) == 0) {
@@ -410,27 +423,40 @@ int lamp_control_task(char *device)
 
 int trivia(void)
 {
+	printf("creating web-server\n");
 	o=onion_new(O_ONE_LOOP);
+
+	printf("obtaining root url\n");
 	onion_url *urls=onion_root_url(o);
-	
+
+	printf("adding questions\n");
 	if(add_questions(urls)) {
 		printf("error: add_questions(): %s\n", strerror(errno));
 		exit(1);
 	}
+	printf("adding landing page\n");
 	if(add_landing_page(urls)) {
 		printf("error: add_landing_page(): %s\n", strerror(errno));
 		exit(1);
 	}
+
+	printf("adding done page\n");
 	if(add_done_page(urls)) {
 		printf("error: add_done_page(): %s\n", strerror(errno));
 		exit(1);
 	}
 
+	printf("adding signal handlers\n");
 	signal(SIGTERM, onexit);
 	signal(SIGINT, onexit);
+
+	printf("adding listening point\n");
 	onion_add_listen_point(o, NULL, "8080", onion_http_new());
+
+	printf("listening\n");
 	onion_listen(o);
 
+	printf("freeing\n");
 	onion_free(o);
 	return 0;
 }
@@ -449,7 +475,7 @@ int main(int argc, char **argv)
 		printf("error: fork(): %s\n", strerror(errno));
 		return 1;
 	case 0:  // Child process
-		return lamp_control_task("/dev/ttyUSB0");
+		return lamp_control_task("/dev/ttyO1");
 	default: // Parent process
 		return trivia();
 	}
