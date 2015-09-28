@@ -33,6 +33,7 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <math.h>
 #include "trivia.h"
 #include "questions.h"
 
@@ -41,6 +42,7 @@ struct rgbw_t {
 	uint16_t green;
 	uint16_t blue;
 	uint16_t white;
+	int have_winner;
 };
 
 typedef struct rgbw_t rgbw;
@@ -88,6 +90,7 @@ onion_connection_status handle_done(void *_, onion_request *req, onion_response 
 	static int load_count = 0;
 	load_count++;
 	if(load_count == 1) {
+		lamp->have_winner = 1;
 		onion_response_printf(res, trivia_end.winner_message, load_count);
 	} else {
 		onion_response_printf(res, trivia_end.other_message, load_count);
@@ -384,14 +387,77 @@ void send_colors(int fd)
 				lamp->white);
 }
 
+void HSVtoRGB( float *r, float *g, float *b, float h, float s, float v )
+{
+	int i;
+	float f, p, q, t;
+	if( s == 0 ) {
+		// achromatic (grey)
+		*r = *g = *b = v;
+		return;
+	}
+	h /= 60;			// sector 0 to 5
+	i = floor( h );
+	f = h - i;			// factorial part of h
+	p = v * ( 1 - s );
+	q = v * ( 1 - s * f );
+	t = v * ( 1 - s * ( 1 - f ) );
+	switch( i ) {
+		case 0:
+			*r = v;
+			*g = t;
+			*b = p;
+			break;
+		case 1:
+			*r = q;
+			*g = v;
+			*b = p;
+			break;
+		case 2:
+			*r = p;
+			*g = v;
+			*b = t;
+			break;
+		case 3:
+			*r = p;
+			*g = q;
+			*b = v;
+			break;
+		case 4:
+			*r = t;
+			*g = p;
+			*b = v;
+			break;
+		default:		// case 5:
+			*r = v;
+			*g = p;
+			*b = q;
+			break;
+	}
+}
+
 void fade_colors(void)
 {
-	int const p = 970;
-	int const p_div = 1000;
-	lamp->red = lamp->red * p / p_div;
-	lamp->green = lamp->green * p / p_div;
-	lamp->blue = lamp->blue * p / p_div;
-	lamp->white = lamp->white * p / p_div;
+	if(lamp->have_winner) {
+		static uint32_t ctr = 0;
+		float r, g, b;
+		float h = (ctr * 5) % 360;
+		float s = 1.0f;
+		float v = 1.0f;
+		HSVtoRGB(&r, &g, &b, h, s, v);
+		lamp->red = floor(r * 65535.0);
+		lamp->green = floor(g * 65535.0);
+		lamp->blue = floor(b * 65535.0);
+		lamp->white = 0;
+		ctr++;
+	} else {
+		int const p = 970;
+		int const p_div = 1000;
+		lamp->red = lamp->red * p / p_div;
+		lamp->green = lamp->green * p / p_div;
+		lamp->blue = lamp->blue * p / p_div;
+		lamp->white = lamp->white * p / p_div;
+	}
 }
 
 void init_color_test(int fd)
