@@ -33,7 +33,6 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <math.h>
 #include "trivia.h"
 #include "questions.h"
 
@@ -49,6 +48,7 @@ typedef struct rgbw_t rgbw;
 
 rgbw *lamp;
 int child;
+static int done_count = 0;
 
 onion *o=NULL;
 
@@ -87,13 +87,12 @@ int add_landing_page(onion_url* urls)
 
 onion_connection_status handle_done(void *_, onion_request *req, onion_response *res)
 {
-	static int load_count = 0;
-	load_count++;
-	if(load_count == 1) {
+	done_count++;
+	if(done_count == 1) {
 		lamp->have_winner = 1;
-		onion_response_printf(res, trivia_end.winner_message, load_count);
+		onion_response_printf(res, trivia_end.winner_message, done_count);
 	} else {
-		onion_response_printf(res, trivia_end.other_message, load_count);
+		onion_response_printf(res, trivia_end.other_message, done_count);
 	}
 	return OCS_PROCESSED;
 }
@@ -101,6 +100,18 @@ onion_connection_status handle_done(void *_, onion_request *req, onion_response 
 int add_done_page(onion_url* urls)
 {
 	return onion_url_add(urls, trivia_end.uri, handle_done);
+}
+
+onion_connection_status handle_reset(void *_, onion_request *req, onion_response *res)
+{
+	done_count = 0;
+	lamp->have_winner = 0;
+	return OCS_PROCESSED;
+}
+
+int add_reset_page(onion_url* urls)
+{
+	return onion_url_add(urls, "reset", handle_reset);
 }
 
 int add_question_page(onion_url *urls, trivia_question const* const q)
@@ -387,67 +398,23 @@ void send_colors(int fd)
 				lamp->white);
 }
 
-void HSVtoRGB( float *r, float *g, float *b, float h, float s, float v )
+uint16_t tw(uint32_t const period, uint32_t x)
 {
-	int i;
-	float f, p, q, t;
-	if( s == 0 ) {
-		// achromatic (grey)
-		*r = *g = *b = v;
-		return;
+	uint32_t const hp = period / 2;
+	x %= period;
+	if(x > hp) {
+		x = period - x;
 	}
-	h /= 60;			// sector 0 to 5
-	i = floor( h );
-	f = h - i;			// factorial part of h
-	p = v * ( 1 - s );
-	q = v * ( 1 - s * f );
-	t = v * ( 1 - s * ( 1 - f ) );
-	switch( i ) {
-		case 0:
-			*r = v;
-			*g = t;
-			*b = p;
-			break;
-		case 1:
-			*r = q;
-			*g = v;
-			*b = p;
-			break;
-		case 2:
-			*r = p;
-			*g = v;
-			*b = t;
-			break;
-		case 3:
-			*r = p;
-			*g = q;
-			*b = v;
-			break;
-		case 4:
-			*r = t;
-			*g = p;
-			*b = v;
-			break;
-		default:		// case 5:
-			*r = v;
-			*g = p;
-			*b = q;
-			break;
-	}
+	return (65535 * x) / hp;
 }
 
 void fade_colors(void)
 {
 	if(lamp->have_winner) {
 		static uint32_t ctr = 0;
-		float r, g, b;
-		float h = (ctr * 5) % 360;
-		float s = 1.0f;
-		float v = 1.0f;
-		HSVtoRGB(&r, &g, &b, h, s, v);
-		lamp->red = floor(r * 65535.0);
-		lamp->green = floor(g * 65535.0);
-		lamp->blue = floor(b * 65535.0);
+		lamp->red = tw(23, ctr);
+		lamp->green = tw(29, ctr);
+		lamp->blue = tw(37, ctr);
 		lamp->white = 0;
 		ctr++;
 	} else {
@@ -542,10 +509,14 @@ int trivia(void)
 		printf("error: add_landing_page(): %s\n", strerror(errno));
 		exit(1);
 	}
-
 	printf("adding done page\n");
 	if(add_done_page(urls)) {
 		printf("error: add_done_page(): %s\n", strerror(errno));
+		exit(1);
+	}
+	printf("adding reset page\n");
+	if(add_reset_page(urls)) {
+		printf("error: add_landing_page(): %s\n", strerror(errno));
 		exit(1);
 	}
 
