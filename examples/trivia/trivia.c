@@ -397,6 +397,7 @@ int get_frame(int fd, char *device, char **frame)
 int send_frame(int fd, char *format, ...)
 {
 	int r;
+#ifdef VERBOSE_COMMS
 	{
 		va_list debug_args;
 		va_start(debug_args, format);
@@ -409,6 +410,7 @@ int send_frame(int fd, char *format, ...)
 		}
 		va_end(debug_args);
 	}
+#endif
 	va_list args;
 	va_start(args, format);
 	if(dprintf(fd, "[") == -1) {
@@ -493,11 +495,13 @@ int lamp_control_task(char *device)
 			return 1;
 		}
 		if(!size) {
-			printf("rx:timeout\n");
+			printf("lamp timeout: re-establishing comms\n");
 			reset_to_factory_test(fd);
 			continue;
 		}
+#ifdef VERBOSE_COMMS
 		printf("rx:[%s]\n", frame);
+#endif
 		if(strcmp("TH,Ready,0", frame) == 0) {
 			sleep(1);
 			init_color_test(fd);
@@ -512,6 +516,7 @@ int lamp_control_task(char *device)
 				reset_to_factory_test(fd);
 			}
 		} else if(strcmp("ColorTest,Init,0", frame) == 0) {
+			printf("lamp initialized: sending colors\n");
 			send_colors(fd);
 		} else if(strcmp("ColorTest,SetDutyCycles,0", frame) == 0) {
 			send_colors(fd);
