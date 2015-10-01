@@ -237,7 +237,6 @@ int strcmp_ignoring_case_and_whitespace(char const* a, char const* b)
 	a = first_non_whitespace(a);
 	b = first_non_whitespace(b);
 	while(*a || *b) {
-		printf("%c:%c\n", *a, *b);
 		if(tolower(*a) < tolower(*b)) {
 			return -1;
 		} else if(tolower(*a) > tolower(*b)) {
