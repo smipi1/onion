@@ -40,7 +40,7 @@ typedef struct trivia_question_t trivia_question;
 typedef struct trivia_done_t trivia_done;
 
 extern char* trivia_title;
-extern char* trivia_welcome_message;
+extern char* trivia_start_message;
 extern char* trivia_bad_answer_message;
 extern trivia_question trivia_questions[];
 extern trivia_done trivia_end;

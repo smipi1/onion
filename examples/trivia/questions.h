@@ -26,7 +26,7 @@ extern "C"{
 
 char* trivia_title = "Trivia: Linux in a light bulb";
 
-char* trivia_welcome_message = "Welcome to the Linux in a light bulb trivia:";
+char* trivia_start_message = "Welcome to the Linux in a light bulb trivia:";
 
 char* trivia_bad_answer_message = "Nope! Sorry... Try again if you like:";
 
@@ -58,7 +58,8 @@ trivia_question trivia_questions[] = {
 	},
 	{
 		"9jtywjlypN4eC4t56xY9fD20OGOAmh4l",
-		"Security is not a state, it is a ___?",
+		"Security cannot be treated as a state (strangely enough Arkansas can), "
+		"it should be treated as a ___.",
 		"process",
 	},
 	{
@@ -69,19 +70,19 @@ trivia_question trivia_questions[] = {
 	},
 	{
 		"DuNeCi4gLneprqkMk3wxBxK6y7sfYHFg",
-		"Complete: The internals of a Philips lamp runs at ___ deg C.",
+		"The internals of a Philips lamp runs at ___ deg C.",
 		"100",
 	},
 	{
 		"7osjb0E5QgqUkErmAwiwrqQxEoZaWTOW",
-		"Complete: Back when modems ruled the world, Linux was distributed on a "
+		"Back when modems ruled the world, Linux was distributed on a "
 		"___ disc.",
 		"floppy",
 	},
 	{
 		"zIOhpJdEWvSQLZ60hkg3PwqldWWa1qr1",
-		"Complete: The primary focus of kernel tinification is to make more of "
-		"Linux ___.",
+		"Efforts with regard to death and taxes have failed, so kernel tinification "
+		"hackers have turned their attention to making more of Linux ___.",
 		"optional",
 	},
 	{
@@ -92,7 +93,7 @@ trivia_question trivia_questions[] = {
 	{
 		"nXHAtNDyasjBdLCB0otTjZqqNKzWmXfy",
 		"Which system call that gives advice about use of memory is now optional "
-		"in mainline due to the spectacularly successful tinification efforts ?",
+		"in mainline due to some spectacularly successful tinification efforts?",
 		"madvise",
 	},
 };
